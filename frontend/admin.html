@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin</title><link rel="stylesheet" href="/static/css/style.css"></head>
+<body><nav><span class="brand">Cloud Event RSVP Tracker - Admin</span><div id="navLinks"></div></nav>
+<div class="container">
+  <div class="card"><h2>Platform statistics</h2><div class="stat-grid" id="stats"></div></div>
+  <div class="card"><h2>Users</h2><div id="users"></div></div>
+  <div class="card"><h2>Events (moderation)</h2><div id="events"></div></div>
+  <div class="card"><h2>Audit log</h2><div id="audit" class="muted"></div></div>
+</div>
+<script src="/static/js/api.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+async function load() {
+  const { user } = await API.me(); if (!user || user.role !== "admin") return location.href = "/login.html";
+  $("navLinks").innerHTML = navHtml(user);
+  const [s, u, e, a] = await Promise.all([API.get("/admin/stats"), API.get("/admin/users"), API.getEvents(), API.get("/admin/audit")]);
+  $("stats").innerHTML = Object.entries(s).map(([k, v]) => `<div class="stat"><div class="num">${v}</div><div class="label">${esc(k)}</div></div>`).join("");
+  $("users").innerHTML = `<table class="simple"><tr><th>Name</th><th>Email</th><th>Role</th></tr>${u.users.map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td><select onchange="setRole('${esc(x.id)}', this.value)">${["attendee","organizer","admin"].map(r => `<option ${r === x.role ? "selected" : ""}>${r}</option>`).join("")}</select></td></tr>`).join("")}</table>`;
+  $("events").innerHTML = e.events.map(x => `<div class="event-row"><div>${esc(x.event_name)} ${statusPill(x.status)}</div><button class="secondary" onclick="moderate('${esc(x.id)}')">Cancel event</button></div>`).join("") || "No events.";
+  $("audit").innerHTML = a.audit.slice(0, 25).map(x => `${fmtDate(x.at)} - <b>${esc(x.action)}</b> ${esc(x.details)}`).join("<br>");
+}
+async function setRole(id, role) { await API.put(`/admin/users/${id}/role`, { role }); load(); }
+async function moderate(id) { await API.put(`/admin/events/${id}/moderate`, { status: "CANCELLED" }); load(); }
+load();
+</script></body></html>

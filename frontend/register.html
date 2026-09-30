@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Register</title><link rel="stylesheet" href="/static/css/style.css"></head>
+<body><nav><span class="brand">Cloud Event RSVP Tracker</span><div><a href="/">Events</a><a href="/login.html">Login</a></div></nav>
+<div class="container" style="max-width:420px"><div class="card"><h1>Create account</h1>
+<label>Full name</label><input id="name"><label>Email</label><input id="email" type="email">
+<label>Password (min 6 chars)</label><input id="password" type="password">
+<label>Role</label><select id="role"><option value="attendee">Attendee</option><option value="organizer">Organizer</option></select>
+<button class="primary" onclick="go()">Register</button><div id="err" class="error"></div>
+<p class="muted">Have an account? <a href="/login.html">Login</a></p></div></div>
+<script src="/static/js/api.js"></script>
+<script>
+async function go() {
+  const $ = id => document.getElementById(id);
+  try {
+    const { user } = await API.register({
+      name: $("name").value.trim(), email: $("email").value.trim(),
+      password: $("password").value, role: $("role").value,
+    });
+    location.href = user.role === "organizer" ? "/organizer_dashboard.html" : "/attendee_dashboard.html";
+  } catch (e) { $("err").textContent = e.message; }
+}
+</script></body></html>

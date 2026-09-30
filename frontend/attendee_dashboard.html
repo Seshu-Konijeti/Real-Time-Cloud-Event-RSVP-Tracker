@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendee Dashboard</title><link rel="stylesheet" href="/static/css/style.css"></head>
+<body>
+<nav><span class="brand">Cloud Event RSVP Tracker</span><div id="navLinks"></div></nav>
+<div class="container">
+  <div class="grid2">
+    <div class="card"><h2>Events I am going to</h2><div id="going">...</div></div>
+    <div class="card"><h2>Maybe</h2><div id="maybe">...</div></div>
+  </div>
+  <div class="card"><h2>Notifications <span id="unread" class="badge going"></span></h2><div id="notifs">...</div></div>
+  <div class="card"><h2>Event updates</h2><div id="updates">...</div></div>
+  <div class="card"><h2>Upcoming events</h2><div id="upcoming">...</div></div>
+  <div class="card"><h2>Past events</h2><div id="past">...</div></div>
+</div>
+<script src="/static/js/api.js"></script>
+<script>
+let me = null; const $ = id => document.getElementById(id);
+async function init() {
+  const { user } = await API.me(); if (!user) return location.href = "/login.html";
+  me = user; $("navLinks").innerHTML = navHtml(user); render(); setInterval(render, 5000);
+}
+const row = (e, extra = "") => `<div class="event-row"><div><a href="/event_detail.html?id=${esc(e.id)}">${esc(e.event_name)}</a>
+  <div class="muted">${esc(e.event_date)} ${esc(e.start_time)} · ${e.going_count} going · ${e.available_seats} seats left</div></div><div>${extra}</div></div>`;
+async function render() {
+  try {
+    const [{ rsvps, waitlist }, { events }, n, u] = await Promise.all([API.myRsvps(), API.getEvents(), API.notifications(), API.updates()]);
+    const by = Object.fromEntries(events.map(e => [e.id, e])), today = new Date().toISOString().slice(0, 10);
+    const list = st => rsvps.filter(r => r.status === st && by[r.event_id] && by[r.event_id].event_date >= today).map(r => row(by[r.event_id], statusPill(by[r.event_id].status))).join("") || `<p class="muted">None.</p>`;
+    $("going").innerHTML = list("GOING"); $("maybe").innerHTML = list("MAYBE");
+    $("unread").textContent = n.unread_count ? n.unread_count + " new" : "";
+    $("notifs").innerHTML = n.notifications.length ? n.notifications.slice(0, 8).map(x => `<div class="event-row" style="${x.read ? "opacity:.6" : ""}"><div>${esc(x.message)}<div class="muted">${fmtDate(x.created_at)}</div></div>${x.read ? "" : `<button class="secondary" onclick="markRead('${esc(x.id)}')">Mark read</button>`}</div>`).join("") : `<p class="muted">No notifications.</p>`;
+    $("updates").innerHTML = u.updates.length ? u.updates.map(x => `<div class="event-row"><div><strong>${esc(x.title)}</strong> <span class="muted">(${esc(x.event_name)})</span><div>${esc(x.message)}</div></div></div>`).join("") : `<p class="muted">No announcements for your events.</p>`;
+    const up = events.filter(e => e.event_date >= today && (e.status === "PUBLISHED" || e.status === "FULL"));
+    $("upcoming").innerHTML = up.map(e => { const m = rsvps.find(r => r.event_id === e.id); return row(e, m ? `<span class="badge ${m.status.toLowerCase()}">${esc(m.status)}</span>` : statusPill(e.status)); }).join("") || `<p class="muted">No upcoming events.</p>`;
+    const mineIds = new Set(rsvps.map(r => r.event_id));
+    $("past").innerHTML = events.filter(e => e.event_date < today && mineIds.has(e.id)).map(e => row(e, statusPill(e.status))).join("") || `<p class="muted">No past events.</p>`;
+  } catch (e) { $("upcoming").innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+}
+async function markRead(id) { await API.markRead(id); render(); }
+init();
+</script></body></html>

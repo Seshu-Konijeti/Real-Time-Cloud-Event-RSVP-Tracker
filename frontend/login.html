@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login</title><link rel="stylesheet" href="/static/css/style.css"></head>
+<body><nav><span class="brand">Cloud Event RSVP Tracker</span><div><a href="/">Events</a><a href="/register.html">Register</a></div></nav>
+<div class="container" style="max-width:420px"><div class="card"><h1>Login</h1>
+<label>Email</label><input id="email" type="email"><label>Password</label><input id="password" type="password">
+<button class="primary" onclick="go()">Login</button><div id="err" class="error"></div>
+<p class="muted">No account? <a href="/register.html">Register</a></p></div></div>
+<script src="/static/js/api.js"></script>
+<script>
+async function go() {
+  const $ = id => document.getElementById(id);
+  try {
+    const { user } = await API.login({ email: $("email").value.trim(), password: $("password").value });
+    location.href = user.role === "admin" ? "/admin.html" : user.role === "organizer" ? "/organizer_dashboard.html" : "/attendee_dashboard.html";
+  } catch (e) { $("err").textContent = e.message; }
+}
+</script></body></html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organizer Dashboard</title><link rel="stylesheet" href="/static/css/style.css"></head>
+<body>
+<nav><span class="brand">Cloud Event RSVP Tracker</span><div id="navLinks"></div></nav>
+<div class="container">
+
+  <div class="card"><h2>Overview</h2><div class="stat-grid" id="summary"></div></div>
+
+  <div class="card">
+    <h2 id="formTitle">Create Event</h2>
+    <label>Event name</label><input id="event_name">
+    <label>Description</label><textarea id="description" rows="2"></textarea>
+    <div class="row">
+      <div><label>Type</label><select id="event_type"><option>workshop</option><option>conference</option><option>meetup</option><option>webinar</option><option>festival</option><option>general</option></select></div>
+      <div><label>Date</label><input id="event_date" type="date"></div>
+      <div><label>Start</label><input id="start_time" type="time" value="10:00"></div>
+      <div><label>End</label><input id="end_time" type="time" value="11:00"></div>
+    </div>
+    <div class="row">
+      <div><label>Venue</label><input id="venue"></div>
+      <div><label>Online link (optional)</label><input id="online_link"></div>
+    </div>
+    <div class="row">
+      <div><label>Max capacity</label><input id="maximum_capacity" type="number" min="1" value="100"></div>
+      <div><label>Registration deadline</label><input id="registration_deadline" type="date"></div>
+      <div><label>Publish as</label><select id="status"><option>PUBLISHED</option><option>DRAFT</option></select></div>
+    </div>
+    <button class="primary" id="saveBtn" onclick="saveEvent()">Publish Event</button>
+    <button class="secondary" id="cancelEditBtn" style="display:none" onclick="resetForm()">Cancel edit</button>
+    <div id="err" class="error"></div>
+  </div>
+
+  <div class="card"><h2>My Events</h2><div id="myEvents">Loading...</div></div>
+
+  <div class="card" id="detail" style="display:none">
+    <h2 id="dTitle"></h2>
+    <div class="live" id="liveState">connecting...</div>
+    <div class="stat-grid" id="dStats"></div>
+    <div class="grid2">
+      <div><h3>RSVP status distribution</h3><canvas class="chart" id="cDonut"></canvas></div>
+      <div><h3>Capacity utilization</h3><canvas class="chart" id="cCap"></canvas></div>
+      <div><h3>Response rate</h3><canvas class="chart" id="cResp"></canvas></div>
+      <div><h3>RSVP growth over time</h3><canvas class="chart" id="cGrowth"></canvas></div>
+    </div>
+    <h3>RSVP timeline</h3><div id="timeline" class="muted"></div>
+    <h3>Attendees</h3><div id="attendees" class="muted"></div>
+    <div class="grid2" style="margin-top:12px">
+      <div><h3>Invite attendees</h3><textarea id="inviteEmails" rows="3" placeholder="one email per line or comma separated"></textarea>
+        <button class="secondary" onclick="sendInvites()">Send invites</button> <button class="secondary" onclick="sendReminder()">Send reminder</button>
+        <div id="inviteMsg" class="muted"></div></div>
+      <div><h3>Announcement</h3><input id="annTitle" placeholder="Title (e.g. Venue Updated)"><textarea id="annMsg" rows="2" placeholder="Message"></textarea>
+        <button class="secondary" onclick="sendAnn()">Send announcement</button><div id="annMsgOut" class="muted"></div></div>
+    </div>
+  </div>
+</div>
+<script src="/static/js/api.js"></script><script src="/static/js/charts.js"></script>
+<script>
+let me = null, events = [], editingId = null, selected = null, unsub = null;
+const F = ["event_name","description","event_type","event_date","start_time","end_time","venue","online_link","maximum_capacity","registration_deadline","status"];
+const $ = id => document.getElementById(id);
+
+async function init() {
+  const { user } = await API.me();
+  if (!user) return location.href = "/login.html";
+  if (user.role === "attendee") return location.href = "/attendee_dashboard.html";
+  me = user; $("navLinks").innerHTML = navHtml(user);
+  await refresh(); setInterval(refresh, 8000);
+}
+
+async function refresh() {
+  try {
+    const [s, e] = await Promise.all([API.summary(), API.getEvents(`?organizer_id=${me.id}`)]);
+    events = e.events;
+    const rr = s.response_rate_percent == null ? "n/a" : s.response_rate_percent + "%";
+    $("summary").innerHTML = [["Total events", s.total_events], ["Upcoming", s.upcoming_events], ["Invitees", s.total_invitees],
+      ["Responses", s.total_responses], ["Going", s.going], ["Maybe", s.maybe], ["Not going", s.not_going],
+      ["Response rate", rr], ["Seats available", s.available_capacity], ["Waitlist", s.waitlist_size]]
+      .map(([l, v]) => `<div class="stat"><div class="num">${esc(v)}</div><div class="label">${l}</div></div>`).join("");
+    $("myEvents").innerHTML = events.length ? events.map(ev => `
+      <div class="event-row"><div><strong>${esc(ev.event_name)}</strong> ${statusPill(ev.status)}
+        <div class="muted">${esc(ev.event_date)} ${esc(ev.start_time)}-${esc(ev.end_time)} · ${ev.going_count}/${ev.maximum_capacity} going</div></div>
+        <div><button class="secondary" onclick="openDetail('${esc(ev.id)}')">Live dashboard</button>
+        <button class="secondary" onclick="editEvent('${esc(ev.id)}')">Edit</button>
+        ${ev.status !== "CANCELLED" ? `<button class="secondary" onclick="cancelEv('${esc(ev.id)}')">Cancel</button>` : ""}
+        <button class="secondary" onclick="delEv('${esc(ev.id)}')">Delete</button></div></div>`).join("")
+      : `<p class="muted">No events yet - create one above.</p>`;
+  } catch (e) { $("myEvents").innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+}
+
+function payload() {
+  const p = {}; F.forEach(k => p[k] = $(k).value.trim());
+  p.maximum_capacity = parseInt(p.maximum_capacity || "100", 10); p.registration_deadline = p.registration_deadline || null;
+  return p;
+}
+async function saveEvent() {
+  try {
+    const p = payload();
+    if (editingId) { delete p.status; await API.updateEvent(editingId, p); } else await API.createEvent(p);
+    resetForm(); await refresh(); if (selected) loadDetail();
+  } catch (e) { $("err").textContent = e.message; }
+}
+function resetForm() {
+  editingId = null; F.forEach(k => { if (!["event_type","start_time","end_time","maximum_capacity","status"].includes(k)) $(k).value = ""; });
+  $("maximum_capacity").value = 100; $("formTitle").textContent = "Create Event"; $("saveBtn").textContent = "Publish Event";
+  $("cancelEditBtn").style.display = "none"; $("status").disabled = false; $("err").textContent = "";
+}
+function editEvent(id) {
+  const ev = events.find(e => e.id === id); editingId = id;
+  F.forEach(k => $(k).value = ev[k] ?? ""); $("status").disabled = true;
+  $("formTitle").textContent = "Edit Event"; $("saveBtn").textContent = "Save changes"; $("cancelEditBtn").style.display = "inline-block";
+  scrollTo({ top: 0, behavior: "smooth" });
+}
+async function cancelEv(id) { if (confirm("Cancel this event? Attendees will be notified.")) { await API.cancelEvent(id); refresh(); } }
+async function delEv(id) { if (confirm("Delete permanently?")) { await API.deleteEvent(id); if (selected === id) { selected = null; $("detail").style.display = "none"; unsub && unsub(); } refresh(); } }
+
+function openDetail(id) {
+  selected = id; unsub && unsub(); $("detail").style.display = "block"; $("detail").scrollIntoView({ behavior: "smooth" });
+  unsub = subscribeEvent(id, snap => { renderSnap(snap); if (snap.announcement) return; loadDetail(); },
+    st => { const l = $("liveState"); l.textContent = st === "live" ? "LIVE - updates pushed instantly (Server-Sent Events)" : st === "polling" ? "Polling fallback (every 3s)" : "Reconnecting..."; l.className = "live" + (st === "live" ? " on" : ""); });
+}
+let last = "";
+function renderSnap(s) {
+  if (!s.going && s.going !== 0) return;
+  $("dTitle").textContent = s.event_name + " - " + s.status;
+  const rr = s.response_rate_percent == null ? "n/a" : s.response_rate_percent + "%";
+  const html = [["Going", s.going], ["Maybe", s.maybe], ["Not going", s.not_going], ["Seats left", s.available_seats],
+    ["Waitlist", s.waitlist_size], ["Response rate", rr], ["Conversion", s.rsvp_conversion_percent + "%"]]
+    .map(([l, v]) => `<div class="stat"><div class="num">${esc(v)}</div><div class="label">${l}</div></div>`).join("");
+  if (html !== last) { $("dStats").innerHTML = html; $("dStats").classList.remove("flash"); void $("dStats").offsetWidth; $("dStats").classList.add("flash"); last = html; }
+  donutChart($("cDonut"), [{ label: "Going", value: s.going, color: COLORS.going }, { label: "Maybe", value: s.maybe, color: COLORS.maybe }, { label: "Not going", value: s.not_going, color: COLORS.not_going }]);
+  barChart($("cCap"), [{ label: "Going", value: s.going, color: COLORS.going }, { label: "Capacity", value: s.maximum_capacity, color: COLORS.grey }]);
+  gaugeBar($("cResp"), s.response_rate_percent, "Response rate");
+}
+async function loadDetail() {
+  if (!selected) return;
+  try {
+    const d = await API.analyticsDetail(selected); renderSnap(d.snapshot);
+    lineChart($("cGrowth"), d.growth.map(g => ({ label: g.bucket, value: g.cumulative })));
+    $("timeline").innerHTML = d.timeline.length ? d.timeline.map(t => `${esc(t.name)} - <b>${esc(t.status)}</b> <span class="muted">${fmtDate(t.at)}</span>`).join("<br>") : "No RSVPs yet.";
+    const r = await API.eventRsvps(selected);
+    $("attendees").innerHTML = r.rsvps.length ? `<table class="simple"><tr><th>Name</th><th>Email</th><th>Status</th></tr>${r.rsvps.map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(x.status)}</td></tr>`).join("")}</table>` : "No attendees yet.";
+  } catch (e) {}
+}
+async function sendInvites() {
+  const emails = $("inviteEmails").value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+  try { const r = await API.invite(selected, emails); $("inviteMsg").textContent = `${r.added} invite(s) added.`; $("inviteEmails").value = ""; loadDetail(); refresh(); }
+  catch (e) { $("inviteMsg").textContent = e.message; }
+}
+async function sendReminder() { try { const r = await API.reminder(selected); $("inviteMsg").textContent = `Reminder sent to ${r.notified} people.`; } catch (e) { $("inviteMsg").textContent = e.message; } }
+async function sendAnn() {
+  try { await API.createAnnouncement(selected, { title: $("annTitle").value, message: $("annMsg").value }); $("annTitle").value = $("annMsg").value = ""; $("annMsgOut").textContent = "Announcement sent."; }
+  catch (e) { $("annMsgOut").textContent = e.message; }
+}
+init();
+</script></body></html>

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Event Details</title><link rel="stylesheet" href="/static/css/style.css"></head>
+<body>
+<nav><span class="brand">Cloud Event RSVP Tracker</span><div id="navLinks"></div></nav>
+<div class="container">
+  <div class="card" id="eventCard">Loading...</div>
+  <div class="card" id="rsvpCard" style="display:none"><h2>Your RSVP</h2>
+    <div class="rsvp-buttons">
+      <button class="secondary" id="btnGOING" onclick="doRsvp('GOING')">Going</button>
+      <button class="secondary" id="btnMAYBE" onclick="doRsvp('MAYBE')">Maybe</button>
+      <button class="secondary" id="btnNOT_GOING" onclick="doRsvp('NOT_GOING')">Not Going</button>
+      <button class="secondary" onclick="doCancel()">Clear RSVP</button></div>
+    <div id="rsvpMsg" class="muted"></div></div>
+  <div class="card"><h2>Announcements</h2><div id="announcements">Loading...</div></div>
+</div>
+<script src="/static/js/api.js"></script>
+<script>
+const eventId = new URLSearchParams(location.search).get("id");
+let me = null, ev = null, busy = false;
+const $ = id => document.getElementById(id);
+
+async function init() {
+  const r = await API.me(); me = r.user; $("navLinks").innerHTML = navHtml(me);
+  if (me) $("rsvpCard").style.display = "block";
+  try { ev = (await API.getEvent(eventId)).event; } catch (e) { $("eventCard").innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  renderEvent(await API.analytics(eventId)); loadAnnouncements(); markMine();
+  subscribeEvent(eventId, s => {
+    if (s.announcement) { loadAnnouncements(); return; }
+    renderEvent(s); markMine();
+  }, st => { $("live").textContent = st === "live" ? "LIVE - updates arrive instantly" : st === "polling" ? "Polling every 3s" : "Reconnecting..."; });
+}
+function renderEvent(s) {
+  if (s.going === undefined) return;
+  $("eventCard").innerHTML = `
+    <h1>${esc(ev.event_name)} ${statusPill(s.status)}</h1>
+    <p class="muted">${esc(ev.event_date)} · ${esc(ev.start_time)}-${esc(ev.end_time)} · ${esc(ev.venue || "")} ${ev.online_link ? "· online" : ""}</p>
+    <p>${esc(ev.description)}</p>
+    <div class="stat-grid">
+      <div class="stat"><div class="num">${s.going}</div><div class="label">Going</div></div>
+      <div class="stat"><div class="num">${s.maybe}</div><div class="label">Maybe</div></div>
+      <div class="stat"><div class="num">${s.not_going}</div><div class="label">Not Going</div></div>
+      <div class="stat"><div class="num">${s.available_seats}</div><div class="label">Seats left</div></div>
+      <div class="stat"><div class="num">${s.waitlist_size}</div><div class="label">Waitlist</div></div></div>
+    <p class="live" id="live"><span class="pulse"></span>connecting...</p>`;
+}
+async function markMine() {
+  if (!me) return;
+  try {
+    const { rsvps, waitlist } = await API.myRsvps(); const mine = rsvps.find(r => r.event_id === eventId);
+    ["GOING", "MAYBE", "NOT_GOING"].forEach(k => $("btn" + k).classList.toggle("active", !!mine && mine.status === k));
+    if (waitlist.some(w => w.event_id === eventId)) { const w = waitlist.find(w => w.event_id === eventId); msg(`You are #${w.position} on the waitlist.`); }
+  } catch (e) {}
+}
+function msg(t, err) { $("rsvpMsg").textContent = t; $("rsvpMsg").className = err ? "error" : "muted"; }
+async function doRsvp(status) {
+  if (busy) return; busy = true;                        // ignore double clicks
+  try { await API.rsvp(eventId, status); msg("Your RSVP has been recorded."); }
+  catch (e) { msg(e.message, e.status !== 409); }
+  finally { busy = false; markMine(); }
+}
+async function doCancel() { try { await API.cancelRsvp(eventId); msg("RSVP cleared."); } catch (e) { msg(e.message, true); } markMine(); }
+async function loadAnnouncements() {
+  const { announcements } = await API.announcements(eventId);
+  $("announcements").innerHTML = announcements.length ? announcements.map(a => `<div class="event-row"><div><strong>${esc(a.title)}</strong><div>${esc(a.message)}</div><div class="muted">${fmtDate(a.created_at)}</div></div></div>`).join("") : `<p class="muted">No announcements yet.</p>`;
+}
+init();
+</script></body></html>

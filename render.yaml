@@ -1,0 +1,15 @@
+# Render.com blueprint (free tier). One worker + threads so the in-process SSE broker works.
+services:
+  - type: web
+    name: real-time-cloud-event-rsvp-tracker
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --chdir backend "app:create_app()" --workers 1 --threads 32 --worker-class gthread --timeout 120 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL          # set to a Render/Supabase Postgres URL for persistence
+        sync: false
