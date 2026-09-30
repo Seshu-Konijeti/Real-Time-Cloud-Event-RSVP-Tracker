@@ -75,7 +75,7 @@ Modules: `backend/` (routes), `cloud/` (DB, auth, notification services), `realt
 32 automated tests including the 25 specified scenarios; matrix in `test_matrix.md`; all pass. Live SSE and gunicorn were verified manually with curl.
 
 ## 24. Cloud Deployment
-Render blueprint / Docker provided. [Add: deployed URL and date once you deploy.] AWS/Azure/GCP designs described.
+Render blueprint / Docker provided.    Deployed at https://real-time-cloud-event-rsvp-tracker-7ml7.onrender.com on 30 Sept 2026. AWS/Azure/GCP designs described.
 
 ## 25. Security
 CSRF guard, rate limiting, headers/CSP, escaping, RBAC, audit log, backend as source of truth for counts.
